@@ -3,7 +3,9 @@ import {
   ButtonBuilder,
   ButtonStyle,
   Client,
+  Events,
   GatewayIntentBits,
+  MessageFlags,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle
@@ -50,21 +52,29 @@ async function ensurePinnedMessage() {
       content: "Нажмите кнопку ниже, чтобы подать заявку",
       components: createEntryMessageComponents()
     });
-    await message.pin();
+    try {
+      await message.pin();
+    } catch (error) {
+      console.warn("Не удалось закрепить сообщение (нет прав Manage Messages?)", error?.code ?? error);
+    }
     console.log(`Создано закрепленное сообщение: ${message.id}. Сохраните ID в PINNED_MESSAGE_ID.`);
   } else {
     await message.edit({
       content: "Нажмите кнопку ниже, чтобы подать заявку.",
       components: createEntryMessageComponents()
     });
-    const pinned = await channel.messages.fetchPinned();
+    const pinned = await channel.messages.fetchPins();
     if (!pinned.has(message.id)) {
-      await message.pin();
+      try {
+        await message.pin();
+      } catch (error) {
+        console.warn("Не удалось закрепить сообщение (нет прав Manage Messages?)", error?.code ?? error);
+      }
     }
   }
 }
 
-client.once("ready", async () => {
+client.once(Events.ClientReady, async () => {
   try {
     await store.load();
     console.log(`Logged in as ${client.user.tag}`);
@@ -79,7 +89,7 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isButton()) {
       if (interaction.customId === "request_open_modal") {
         await interaction.reply({
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
           content:
             "Выберите версию Minecraft, затем откроется форма с ником.\n" +
             "--------------------------------------\n" +
@@ -118,7 +128,7 @@ client.on("interactionCreate", async (interaction) => {
         if (!config.moderatorIds.includes(interaction.user.id)) {
           await interaction.reply({
             content: "У вас нет прав на принятие и отклонение заявок.",
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -126,11 +136,11 @@ client.on("interactionCreate", async (interaction) => {
         const [action, requestId] = interaction.customId.split(":");
         const request = store.getById(requestId);
         if (!request) {
-          await interaction.followUp({ content: "Заявка не найдена.", ephemeral: true });
+          await interaction.followUp({ content: "Заявка не найдена.", flags: MessageFlags.Ephemeral });
           return;
         }
         if (request.status !== "PENDING") {
-          await interaction.followUp({ content: "Эта заявка уже обработана.", ephemeral: true });
+          await interaction.followUp({ content: "Эта заявка уже обработана.", flags: MessageFlags.Ephemeral });
           return;
         }
         const status = action === "request_accept" ? "ACCEPTED" : "REJECTED";
@@ -157,7 +167,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith("request_modal:")) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const nickname = interaction.fields.getTextInputValue("nickname").trim();
       const pickedEdition = interaction.customId.split(":")[1];
       const edition = pickedEdition === "Bedrock" ? "[📱] Bedrock" : "[🖥️] Java";
@@ -179,7 +189,9 @@ client.on("interactionCreate", async (interaction) => {
         playerName: request.nickname,
         edition: request.edition,
         status: "pending",
-        admin: request.admin
+        admin: request.admin,
+        createdByDiscordId: interaction.user.id,
+        createdByDiscordName: interaction.user.username
       });
 
       const channel = await client.channels.fetch(config.requestsChannelId);
@@ -195,7 +207,7 @@ client.on("interactionCreate", async (interaction) => {
   } catch (error) {
     console.error("interaction error", error);
     if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: "Ошибка обработки запроса.", ephemeral: true });
+      await interaction.reply({ content: "Ошибка обработки запроса.", flags: MessageFlags.Ephemeral });
     } else if (interaction.isRepliable() && interaction.deferred) {
       await interaction.editReply({ content: "Ошибка обработки запроса." });
     }
