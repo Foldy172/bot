@@ -10,6 +10,22 @@ export class McApiClient {
     this.secret = secret;
   }
 
+  async whitelistRemove(playerName) {
+    return this.#withRetry(async () => {
+      const res = await fetch(`${this.baseUrl}/api/whitelist/remove`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-KEY": this.secret
+        },
+        body: JSON.stringify({ playerName })
+      });
+      if (!res.ok) {
+        throw new Error(`whitelistRemove failed: ${res.status}`);
+      }
+    });
+  }
+
   async createOrSyncRequest(payload) {
     return this.#withRetry(async () => {
       const res = await fetch(`${this.baseUrl}/api/requests`, {

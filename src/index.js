@@ -1,5 +1,6 @@
 import {
   ActionRowBuilder,
+  ApplicationCommandOptionType,
   ButtonBuilder,
   ButtonStyle,
   Client,
@@ -74,10 +75,29 @@ async function ensurePinnedMessage() {
   }
 }
 
+async function ensureCommands() {
+  const guild = await client.guilds.fetch(config.guildId);
+  await guild.commands.set([
+    {
+      name: "whitelistremove",
+      description: "Убрать игрока из whitelist на Minecraft сервере",
+      options: [
+        {
+          name: "nickname",
+          description: "Ник игрока в Minecraft",
+          type: ApplicationCommandOptionType.String,
+          required: true
+        }
+      ]
+    }
+  ]);
+}
+
 client.once(Events.ClientReady, async () => {
   try {
     await store.load();
     console.log(`Logged in as ${client.user.tag}`);
+    await ensureCommands();
     await ensurePinnedMessage();
   } catch (error) {
     console.error("startup error", error);
@@ -86,6 +106,20 @@ client.once(Events.ClientReady, async () => {
 
 client.on("interactionCreate", async (interaction) => {
   try {
+    if (interaction.isChatInputCommand()) {
+      if (interaction.commandName === "whitelistremove") {
+        if (!config.moderatorIds.includes(interaction.user.id)) {
+          await interaction.reply({ content: "У вас нет прав на эту команду.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+        const nickname = interaction.options.getString("nickname", true).trim();
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        await mcApi.whitelistRemove(nickname);
+        await interaction.editReply({ content: `Готово. Убрал из whitelist: ${nickname}` });
+        return;
+      }
+    }
+
     if (interaction.isButton()) {
       if (interaction.customId === "request_open_modal") {
         await interaction.reply({
