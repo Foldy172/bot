@@ -16,6 +16,10 @@ export const config = {
   entryChannelId: process.env.ENTRY_CHANNEL_ID || process.env.CHANNEL_ID || requireVar("CHANNEL_ID"),
   requestsChannelId: process.env.REQUESTS_CHANNEL_ID || process.env.CHANNEL_ID || requireVar("CHANNEL_ID"),
   pinnedMessageId: process.env.PINNED_MESSAGE_ID || null,
+  moderatorIds: (process.env.MODERATOR_IDS || "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean),
   mcApiBaseUrl: requireVar("MC_API_BASE_URL"),
   mcApiSecret: requireVar("MC_API_SECRET"),
   dbPath: process.env.REQUESTS_DB_PATH || "./data/requests.json"

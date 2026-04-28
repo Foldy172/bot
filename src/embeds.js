@@ -9,20 +9,20 @@ export function createEntryMessageComponents() {
 
 export function requestEmbed(request) {
   const embed = new EmbedBuilder()
-    .setTitle("Minecraft Request")
+    .setTitle("Заявка на whitelist")
     .setColor(request.status === "ACCEPTED" ? 0x2ecc71 : request.status === "REJECTED" ? 0xe74c3c : 0xf1c40f)
     .addFields(
       { name: "ID", value: request.id, inline: true },
-      { name: "Nickname", value: request.nickname, inline: true },
-      { name: "Edition", value: request.edition, inline: true },
-      { name: "Status", value: request.status, inline: false }
+      { name: "Ник", value: request.nickname, inline: true },
+      { name: "Версия", value: request.edition, inline: true },
+      { name: "Статус", value: request.status, inline: false }
     )
     .setTimestamp(new Date(request.createdAt));
 
   if (request.moderatedBy) {
     embed.addFields({
-      name: "Moderation",
-      value: `${request.status} by ${request.moderatedBy}`,
+      name: "Модерация",
+      value: `${request.status} — ${request.moderatedBy}`,
       inline: false
     });
   }
@@ -34,12 +34,12 @@ export function moderationButtons(id, disabled = false) {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`request_accept:${id}`)
-        .setLabel("✅ Accept")
+        .setLabel("✅ Принять")
         .setStyle(ButtonStyle.Success)
         .setDisabled(disabled),
       new ButtonBuilder()
         .setCustomId(`request_reject:${id}`)
-        .setLabel("❌ Reject")
+        .setLabel("❌ Отклонить")
         .setStyle(ButtonStyle.Danger)
         .setDisabled(disabled)
     )

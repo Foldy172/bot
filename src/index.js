@@ -1,5 +1,7 @@
 import {
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   Client,
   GatewayIntentBits,
   ModalBuilder,
@@ -16,10 +18,22 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const store = new RequestStore(config.dbPath);
 const mcApi = new McApiClient(config.mcApiBaseUrl, config.mcApiSecret);
 
+function editionPickerComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("request_pick_edition:Java").setLabel("[🖥️] Java").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("request_pick_edition:Bedrock")
+        .setLabel("[📱] Bedrock")
+        .setStyle(ButtonStyle.Secondary)
+    )
+  ];
+}
+
 async function ensurePinnedMessage() {
   const channel = await client.channels.fetch(config.entryChannelId);
   if (!channel || !channel.isTextBased()) {
-    throw new Error("Configured entry channel is not text-based");
+    throw new Error("Канал подачи заявки недоступен или не текстовый");
   }
 
   let message = null;
@@ -33,11 +47,11 @@ async function ensurePinnedMessage() {
 
   if (!message) {
     message = await channel.send({
-      content: "Нажмите кнопку ниже, чтобы подать заявку на whitelist.",
+      content: "Нажмите кнопку ниже, чтобы подать заявку",
       components: createEntryMessageComponents()
     });
     await message.pin();
-    console.log(`Created pinned message: ${message.id}. Save as PINNED_MESSAGE_ID in .env`);
+    console.log(`Создано закрепленное сообщение: ${message.id}. Сохраните ID в PINNED_MESSAGE_ID.`);
   } else {
     await message.edit({
       content: "Нажмите кнопку ниже, чтобы подать заявку на whitelist.",
@@ -64,37 +78,56 @@ client.on("interactionCreate", async (interaction) => {
   try {
     if (interaction.isButton()) {
       if (interaction.customId === "request_open_modal") {
-        const modal = new ModalBuilder().setCustomId("request_modal").setTitle("Whitelist request");
+        await interaction.reply({
+          ephemeral: true,
+          content:
+            "Выберите версию Minecraft, затем откроется форма с ником.\n" +
+            "Вводите ник с УЧЁТОМ регистра букв.\n" +
+            "Пример: Ваш ник - Foldy.\n" +
+            "[❌] foldy, fOldy, fOLDY\n" +
+            "[✅] Foldy\n" +
+            "Версия сервера: 1.21.11\n" +
+            "Сервер: `178.215.238.90:42069`\n" +
+            "Сервер: `178.215.238.90` `42067`\n" +
+            "Заявка будет отправлена в канал модерации.",
+
+          components: editionPickerComponents()
+        });
+        return;
+      }
+
+      if (interaction.customId.startsWith("request_pick_edition:")) {
+        const edition = interaction.customId.split(":")[1];
+        const modal = new ModalBuilder().setCustomId(`request_modal:${edition}`).setTitle("Подача заявки");
         const nickname = new TextInputBuilder()
           .setCustomId("nickname")
-          .setLabel("Minecraft nickname")
+          .setLabel("Ник в Minecraft")
+          .setPlaceholder("Например: Steve")
           .setRequired(true)
           .setMaxLength(16)
           .setStyle(TextInputStyle.Short);
-        const edition = new TextInputBuilder()
-          .setCustomId("edition")
-          .setLabel("Edition: Java / Bedrock")
-          .setRequired(true)
-          .setMaxLength(16)
-          .setStyle(TextInputStyle.Short);
-        modal.addComponents(
-          new ActionRowBuilder().addComponents(nickname),
-          new ActionRowBuilder().addComponents(edition)
-        );
+        modal.addComponents(new ActionRowBuilder().addComponents(nickname));
         await interaction.showModal(modal);
         return;
       }
 
       if (interaction.customId.startsWith("request_accept:") || interaction.customId.startsWith("request_reject:")) {
+        if (!config.moderatorIds.includes(interaction.user.id)) {
+          await interaction.reply({
+            content: "У вас нет прав на принятие и отклонение заявок.",
+            ephemeral: true
+          });
+          return;
+        }
         await interaction.deferUpdate();
         const [action, requestId] = interaction.customId.split(":");
         const request = store.getById(requestId);
         if (!request) {
-          await interaction.followUp({ content: "Request not found.", ephemeral: true });
+          await interaction.followUp({ content: "Заявка не найдена.", ephemeral: true });
           return;
         }
         if (request.status !== "PENDING") {
-          await interaction.followUp({ content: "This request has already been processed.", ephemeral: true });
+          await interaction.followUp({ content: "Эта заявка уже обработана.", ephemeral: true });
           return;
         }
         const status = action === "request_accept" ? "ACCEPTED" : "REJECTED";
@@ -120,11 +153,11 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
-    if (interaction.isModalSubmit() && interaction.customId === "request_modal") {
+    if (interaction.isModalSubmit() && interaction.customId.startsWith("request_modal:")) {
       await interaction.deferReply({ ephemeral: true });
       const nickname = interaction.fields.getTextInputValue("nickname").trim();
-      const editionRaw = interaction.fields.getTextInputValue("edition").trim();
-      const edition = editionRaw.toLowerCase().includes("bedrock") ? "Bedrock" : "Java";
+      const pickedEdition = interaction.customId.split(":")[1];
+      const edition = pickedEdition === "Bedrock" ? "[📱] Bedrock" : "[🖥️] Java";
       const id = `REQ-${Date.now()}-${nanoid(5).toUpperCase()}`;
       const request = {
         id,
@@ -148,7 +181,7 @@ client.on("interactionCreate", async (interaction) => {
 
       const channel = await client.channels.fetch(config.requestsChannelId);
       if (!channel || !channel.isTextBased()) {
-        throw new Error("Configured requests channel is not text-based");
+        throw new Error("Канал модерации недоступен или не текстовый");
       }
       await channel.send({
         embeds: [requestEmbed(request)],
