@@ -15,6 +15,13 @@ export function requestEmbed(request) {
       { name: "ID", value: request.id, inline: true },
       { name: "Ник", value: request.nickname, inline: true },
       { name: "Версия", value: request.edition, inline: true },
+      {
+        name: "Автор",
+        value: request.createdByDiscordId
+          ? `<@${request.createdByDiscordId}>${request.createdByDiscordName ? ` (${request.createdByDiscordName})` : ""}`
+          : (request.createdByDiscordName ?? "—"),
+        inline: false
+      },
       { name: "Статус", value: request.status, inline: false }
     )
     .setTimestamp(new Date(request.createdAt));
