@@ -1,6 +1,6 @@
 # Discord Requests Bot
 
-Discord-бот (`discord.js`) для сбора и модерации заявок на whitelist Minecraft.
+Discord-бот (`discord.js`) для сбора и модерации заявок в вайтлист
 
 ## Features
 
