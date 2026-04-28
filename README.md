@@ -1,5 +1,7 @@
 # Discord Requests Bot
 
+MADE WITH CURSOR AI
+
 Discord-бот (`discord.js`) для сбора и модерации заявок в вайтлист
 
 ## Features
