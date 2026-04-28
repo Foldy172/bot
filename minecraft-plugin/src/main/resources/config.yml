@@ -1,0 +1,28 @@
+discord:
+  bot-token: ""
+  guild-id: "123456789012345678"
+  channel-id: "123456789012345678"
+
+requests:
+  whitelist-on-accept: true
+
+api:
+  host: "0.0.0.0"
+  port: 8085
+  secret-key: "change-me"
+
+database:
+  type: "sqlite"
+  sqlite:
+    file: "requests.db"
+  mysql:
+    host: "127.0.0.1"
+    port: 3306
+    database: "mc_requests"
+    user: "root"
+    password: "password"
+    pool-size: 10
+
+logging:
+  level: "INFO"
+
