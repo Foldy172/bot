@@ -54,7 +54,7 @@ async function ensurePinnedMessage() {
     console.log(`Создано закрепленное сообщение: ${message.id}. Сохраните ID в PINNED_MESSAGE_ID.`);
   } else {
     await message.edit({
-      content: "Нажмите кнопку ниже, чтобы подать заявку на whitelist.",
+      content: "Нажмите кнопку ниже, чтобы подать заявку.",
       components: createEntryMessageComponents()
     });
     const pinned = await channel.messages.fetchPinned();
@@ -82,13 +82,16 @@ client.on("interactionCreate", async (interaction) => {
           ephemeral: true,
           content:
             "Выберите версию Minecraft, затем откроется форма с ником.\n" +
+            "--------------------------------------\n" +
             "Вводите ник с УЧЁТОМ регистра букв.\n" +
             "Пример: Ваш ник - Foldy.\n" +
             "[❌] foldy, fOldy, fOLDY\n" +
             "[✅] Foldy\n" +
+            "---------------------------------------\n" +
             "Версия сервера: 1.21.11\n" +
             "Сервер: `178.215.238.90:42069`\n" +
-            "Сервер: `178.215.238.90` `42067`\n" +
+            "Сервер для телефона: `178.215.238.90` `42067`\n" +
+            "---------------------------------------\n" +
             "Заявка будет отправлена в канал модерации.",
 
           components: editionPickerComponents()
