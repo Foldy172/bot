@@ -65,7 +65,13 @@ async function ensurePinnedMessage() {
       components: createEntryMessageComponents()
     });
     const pinned = await channel.messages.fetchPins();
-    if (!pinned.has(message.id)) {
+    const isPinned =
+      typeof pinned?.has === "function"
+        ? pinned.has(message.id)
+        : Array.isArray(pinned)
+          ? pinned.some((m) => m?.id === message.id)
+          : false;
+    if (!isPinned) {
       try {
         await message.pin();
       } catch (error) {
