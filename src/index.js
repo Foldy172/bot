@@ -336,20 +336,17 @@ client.on("interactionCreate", async (interaction) => {
           console.warn("Не удалось обновить сообщение заявки", editError?.code ?? editError);
         }
 
-        // Notify applicant in entry channel (with ping)
+        // Notify applicant in DM
         if (updated?.createdByDiscordId) {
           try {
-            const entryChannel = await client.channels.fetch(config.entryChannelId);
-            if (entryChannel?.isTextBased()) {
-              const verdict = status === "ACCEPTED" ? "✅ **принята**" : "❌ **отклонена**";
-              await entryChannel.send({
-                content:
-                  `<@${updated.createdByDiscordId}>, ваша заявка **${updated.id}** (${updated.edition}, ник: **${updated.nickname}**) ${verdict}.\n` +
-                  `Модератор: **${moderator}**`
-              });
-            }
+            const user = await client.users.fetch(updated.createdByDiscordId);
+            const verdict = status === "ACCEPTED" ? "✅ **принята**" : "❌ **отклонена**";
+            await user.send(
+              `Ваша заявка **${updated.id}** (${updated.edition}, ник: **${updated.nickname}**) ${verdict}.\n` +
+                `Модератор: **${moderator}**`
+            );
           } catch (notifyError) {
-            console.warn("Не удалось отправить уведомление в канал подачи заявки", notifyError?.code ?? notifyError);
+            console.warn("Не удалось отправить уведомление в ЛС (возможно, закрыты ЛС)", notifyError?.code ?? notifyError);
           }
         }
         moderationLocks.delete(requestId);
