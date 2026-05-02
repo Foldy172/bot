@@ -21,6 +21,22 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const store = new RequestStore(config.dbPath);
 const mcApi = new McApiClient(config.mcApiBaseUrl, config.mcApiSecret);
 
+const moderationLocks = new Map();
+
+function isModerator(userId) {
+  return config.moderatorIds.includes(userId);
+}
+
+function formatBlacklistEntry(entry) {
+  if (typeof entry === "string") {
+    return `<@${entry}> (\`${entry}\`) — навсегда`;
+  }
+  const id = entry.discordUserId;
+  const until = entry.expiresAt ? `до **${new Date(entry.expiresAt).toLocaleString("ru-RU")}**` : "навсегда";
+  const reason = entry.reason ? `\nПричина: ${entry.reason}` : "";
+  return `<@${id}> (\`${id}\`) — ${until}${reason}`;
+}
+
 function editionPickerComponents() {
   return [
     new ActionRowBuilder().addComponents(
@@ -95,6 +111,56 @@ async function ensureCommands() {
           required: true
         }
       ]
+    },
+    {
+      name: "blacklist",
+      description: "Запретить/разрешить пользователю создавать заявки",
+      options: [
+        {
+          type: ApplicationCommandOptionType.Subcommand,
+          name: "add",
+          description: "Запретить пользователю создавать заявки",
+          options: [
+            {
+              type: ApplicationCommandOptionType.User,
+              name: "user",
+              description: "Пользователь Discord",
+              required: true
+            },
+            {
+              type: ApplicationCommandOptionType.Integer,
+              name: "minutes",
+              description: "Срок блокировки в минутах (если не указать — навсегда)",
+              required: false,
+              min_value: 1
+            },
+            {
+              type: ApplicationCommandOptionType.String,
+              name: "reason",
+              description: "Причина (опционально)",
+              required: false
+            }
+          ]
+        },
+        {
+          type: ApplicationCommandOptionType.Subcommand,
+          name: "remove",
+          description: "Разрешить пользователю снова создавать заявки",
+          options: [
+            {
+              type: ApplicationCommandOptionType.User,
+              name: "user",
+              description: "Пользователь Discord",
+              required: true
+            }
+          ]
+        },
+        {
+          type: ApplicationCommandOptionType.Subcommand,
+          name: "list",
+          description: "Показать список пользователей в blacklist"
+        }
+      ]
     }
   ]);
 }
@@ -114,7 +180,7 @@ client.on("interactionCreate", async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === "whitelistremove") {
-        if (!config.moderatorIds.includes(interaction.user.id)) {
+        if (!isModerator(interaction.user.id)) {
           await interaction.reply({ content: "У вас нет прав на эту команду.", flags: MessageFlags.Ephemeral });
           return;
         }
@@ -124,10 +190,58 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.editReply({ content: `Готово. Убрал из whitelist: ${nickname}` });
         return;
       }
+
+      if (interaction.commandName === "blacklist") {
+        if (!isModerator(interaction.user.id)) {
+          await interaction.reply({ content: "У вас нет прав на эту команду.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const subcommand = interaction.options.getSubcommand(true);
+
+        if (subcommand === "list") {
+          await store.pruneExpiredBlacklist();
+          const entries = store.listBlacklist();
+          const body = entries.length ? entries.map(formatBlacklistEntry).join("\n\n") : "Список пуст.";
+          await interaction.reply({ content: body, flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const user = interaction.options.getUser("user", true);
+        if (subcommand === "add") {
+          const minutes = interaction.options.getInteger("minutes", false);
+          const reason = interaction.options.getString("reason", false);
+          await store.addToBlacklist(user.id, { minutes: minutes ?? null, reason: reason ?? null, addedBy: interaction.user.id });
+          const untilText =
+            typeof minutes === "number" && minutes > 0
+              ? `на **${minutes}** мин. (до ${new Date(Date.now() + minutes * 60_000).toLocaleString("ru-RU")})`
+              : "навсегда";
+          await interaction.reply({
+            content: `Добавил в blacklist: <@${user.id}> (\`${user.id}\`) — ${untilText}${reason ? `\nПричина: ${reason}` : ""}`,
+            flags: MessageFlags.Ephemeral
+          });
+          return;
+        }
+        if (subcommand === "remove") {
+          await store.removeFromBlacklist(user.id);
+          await interaction.reply({
+            content: `Убрал из blacklist: <@${user.id}> (\`${user.id}\`)`,
+            flags: MessageFlags.Ephemeral
+          });
+          return;
+        }
+      }
     }
 
     if (interaction.isButton()) {
       if (interaction.customId === "request_open_modal") {
+        if (await store.isBlacklisted(interaction.user.id)) {
+          await interaction.reply({
+            flags: MessageFlags.Ephemeral,
+            content: "Вам запрещено создавать заявки. Если это ошибка — обратитесь к модератору."
+          });
+          return;
+        }
         await interaction.reply({
           flags: MessageFlags.Ephemeral,
           content:
@@ -165,7 +279,7 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       if (interaction.customId.startsWith("request_accept:") || interaction.customId.startsWith("request_reject:")) {
-        if (!config.moderatorIds.includes(interaction.user.id)) {
+        if (!isModerator(interaction.user.id)) {
           await interaction.reply({
             content: "У вас нет прав на принятие и отклонение заявок.",
             flags: MessageFlags.Ephemeral
@@ -174,12 +288,19 @@ client.on("interactionCreate", async (interaction) => {
         }
         await interaction.deferUpdate();
         const [action, requestId] = interaction.customId.split(":");
+        if (moderationLocks.has(requestId)) {
+          await interaction.followUp({ content: "Эта заявка уже обрабатывается.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+        moderationLocks.set(requestId, true);
         const request = store.getById(requestId);
         if (!request) {
+          moderationLocks.delete(requestId);
           await interaction.followUp({ content: "Заявка не найдена.", flags: MessageFlags.Ephemeral });
           return;
         }
         if (request.status !== "PENDING") {
+          moderationLocks.delete(requestId);
           await interaction.followUp({ content: "Эта заявка уже обработана.", flags: MessageFlags.Ephemeral });
           return;
         }
@@ -191,23 +312,59 @@ client.on("interactionCreate", async (interaction) => {
           updatedAt: new Date().toISOString()
         });
 
-        if (status === "ACCEPTED") {
-          await mcApi.updateStatus(requestId, "accepted");
-        } else {
-          await mcApi.updateStatus(requestId, "rejected");
+        try {
+          if (status === "ACCEPTED") {
+            await mcApi.updateStatus(requestId, "accepted");
+          } else {
+            await mcApi.updateStatus(requestId, "rejected");
+          }
+        } catch (mcError) {
+          console.warn("MC API updateStatus failed", mcError?.code ?? mcError);
+          await interaction.followUp({
+            content: "Статус в Discord обновлён, но синхронизация с Minecraft API не удалась (попробуйте позже).",
+            flags: MessageFlags.Ephemeral
+          });
         }
 
         const updated = store.getById(requestId);
-        await interaction.message.edit({
-          embeds: [requestEmbed(updated)],
-          components: moderationButtons(requestId, true)
-        });
+        try {
+          await interaction.message.edit({
+            embeds: [requestEmbed(updated)],
+            components: moderationButtons(requestId, true)
+          });
+        } catch (editError) {
+          console.warn("Не удалось обновить сообщение заявки", editError?.code ?? editError);
+        }
+
+        // Notify applicant in entry channel (with ping)
+        if (updated?.createdByDiscordId) {
+          try {
+            const entryChannel = await client.channels.fetch(config.entryChannelId);
+            if (entryChannel?.isTextBased()) {
+              const verdict = status === "ACCEPTED" ? "✅ **принята**" : "❌ **отклонена**";
+              await entryChannel.send({
+                content:
+                  `<@${updated.createdByDiscordId}>, ваша заявка **${updated.id}** (${updated.edition}, ник: **${updated.nickname}**) ${verdict}.\n` +
+                  `Модератор: **${moderator}**`
+              });
+            }
+          } catch (notifyError) {
+            console.warn("Не удалось отправить уведомление в канал подачи заявки", notifyError?.code ?? notifyError);
+          }
+        }
+        moderationLocks.delete(requestId);
         return;
       }
     }
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith("request_modal:")) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      if (await store.isBlacklisted(interaction.user.id)) {
+        await interaction.editReply({
+          content: "Вам запрещено создавать заявки. Если это ошибка — обратитесь к модератору."
+        });
+        return;
+      }
       const nickname = interaction.fields.getTextInputValue("nickname").trim();
       const pickedEdition = interaction.customId.split(":")[1];
       const edition = pickedEdition === "Bedrock" ? "[📱] Bedrock" : "[🖥️] Java";
@@ -221,18 +378,25 @@ client.on("interactionCreate", async (interaction) => {
         moderatedBy: null,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        createdByDiscordId: interaction.user.id
-      };
-      await store.create(request);
-      await mcApi.createOrSyncRequest({
-        id: request.id,
-        playerName: request.nickname,
-        edition: request.edition,
-        status: "pending",
-        admin: request.admin,
         createdByDiscordId: interaction.user.id,
         createdByDiscordName: interaction.user.username
-      });
+      };
+      await store.create(request);
+      let mcSyncOk = true;
+      try {
+        await mcApi.createOrSyncRequest({
+          id: request.id,
+          playerName: request.nickname,
+          edition: request.edition,
+          status: "pending",
+          admin: request.admin,
+          createdByDiscordId: interaction.user.id,
+          createdByDiscordName: interaction.user.username
+        });
+      } catch (mcError) {
+        mcSyncOk = false;
+        console.warn("MC API createOrSyncRequest failed", mcError?.code ?? mcError);
+      }
 
       const channel = await client.channels.fetch(config.requestsChannelId);
       if (!channel || !channel.isTextBased()) {
@@ -242,7 +406,9 @@ client.on("interactionCreate", async (interaction) => {
         embeds: [requestEmbed(request)],
         components: moderationButtons(id)
       });
-      await interaction.editReply({ content: `Заявка создана: ${id}` });
+      await interaction.editReply({
+        content: mcSyncOk ? `Заявка создана: ${id}` : `Заявка создана: ${id}\nНо синхронизация с Minecraft API временно недоступна.`
+      });
     }
   } catch (error) {
     console.error("interaction error", error);
